@@ -15,7 +15,7 @@ pub fn init(font_dirs: &[String], font_family: &str) -> Option<(fontdb::Database
     if families.is_empty() {
         None
     } else {
-        for name in ["DejaVu Sans", "Noto Emoji"] {
+        for name in ["DejaVu Sans", "Noto Color Emoji", "Noto Emoji"] {
             if let Some(name) = find_font_family(&font_db, name) {
                 if !families.contains(&name) {
                     families.push(name);
