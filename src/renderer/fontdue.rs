@@ -20,6 +20,7 @@ pub struct FontdueRenderer {
     font_db: fontdb::Database,
     glyph_cache: HashMap<CharVariant, Option<Glyph>>,
     font_cache: HashMap<FontFace, Option<fontdue::Font>>,
+    frame_buf: Vec<RGBA8>,
 }
 
 fn get_font<T: AsRef<str> + std::fmt::Debug>(
@@ -74,17 +75,21 @@ impl FontdueRenderer {
         let col_width = metrics.advance_width as f64;
         let row_height = (settings.font_size as f64) * settings.line_height;
 
+        let pixel_width = ((cols + 2) as f64 * col_width).round() as usize;
+        let pixel_height = ((rows + 1) as f64 * row_height).round() as usize;
+
         Self {
             font_db: settings.font_db,
             font_families: settings.font_families,
             theme: settings.theme,
-            pixel_width: ((cols + 2) as f64 * col_width).round() as usize,
-            pixel_height: ((rows + 1) as f64 * row_height).round() as usize,
+            pixel_width,
+            pixel_height,
             font_size: settings.font_size,
             col_width,
             row_height,
             font_cache: HashMap::new(),
             glyph_cache: HashMap::new(),
+            frame_buf: vec![RGBA8::default(); pixel_width * pixel_height],
         }
     }
 
@@ -129,10 +134,6 @@ impl FontdueRenderer {
         self.glyph_cache.insert(key, None);
     }
 
-    fn get_glyph(&self, ch: char, bold: bool, italic: bool) -> &Option<Glyph> {
-        self.glyph_cache.get(&(ch, bold, italic)).unwrap()
-    }
-
     fn rasterize_glyph(&mut self, ch: char, bold: bool, italic: bool) -> Option<Glyph> {
         let font_size = self.font_size as f32;
 
@@ -168,8 +169,8 @@ fn mix_colors(fg: RGBA8, bg: RGBA8, ratio: u8) -> RGBA8 {
 
 impl Renderer for FontdueRenderer {
     fn render(&mut self, lines: Vec<avt::Line>, cursor: Option<(usize, usize)>) -> ImgVec<RGBA8> {
-        let mut buf: Vec<RGBA8> =
-            vec![self.theme.background.alpha(255); self.pixel_width * self.pixel_height];
+        let bg = self.theme.background.alpha(255);
+        self.frame_buf.fill(bg);
 
         let margin_l = self.col_width;
         let margin_t = (self.row_height / 2.0).round() as usize;
@@ -191,7 +192,7 @@ impl Renderer for FontdueRenderer {
 
                     for y in y_t..y_b {
                         for x in x_l..x_r {
-                            buf[y * self.pixel_width + x] = c.alpha(255);
+                            self.frame_buf[y * self.pixel_width + x] = c.alpha(255);
                         }
                     }
                 }
@@ -210,7 +211,7 @@ impl Renderer for FontdueRenderer {
                             as usize;
 
                     for x in x_l..x_r {
-                        buf[y * self.pixel_width + x] = fg;
+                        self.frame_buf[y * self.pixel_width + x] = fg;
                     }
                 }
 
@@ -220,13 +221,16 @@ impl Renderer for FontdueRenderer {
                 }
 
                 self.ensure_glyph(ch, attrs.bold, attrs.italic);
-                let glyph = self.get_glyph(ch, attrs.bold, attrs.italic);
 
-                if glyph.is_none() {
-                    continue;
-                }
-
-                let (metrics, bitmap) = glyph.as_ref().unwrap();
+                // Copy metrics and bitmap out of the cache to release the borrow
+                // on glyph_cache, so we can mutate frame_buf safely below.
+                let (metrics, bitmap) = match self.glyph_cache.get(&(ch, attrs.bold, attrs.italic)).unwrap() {
+                    Some((m, b)) => (*m, b.clone()),
+                    None => {
+                        col += cell.width();
+                        continue;
+                    }
+                };
 
                 let y_offset = (margin_t + self.font_size - metrics.height) as i32
                     + (row as f64 * self.row_height).round() as i32
@@ -257,9 +261,8 @@ impl Renderer for FontdueRenderer {
                         }
 
                         let idx = (y as usize) * self.pixel_width + (x as usize);
-                        let bg = buf[idx];
-
-                        buf[idx] = mix_colors(fg, bg, ratio);
+                        let bg = self.frame_buf[idx];
+                        self.frame_buf[idx] = mix_colors(fg, bg, ratio);
                     }
                 }
 
@@ -267,7 +270,7 @@ impl Renderer for FontdueRenderer {
             }
         }
 
-        ImgVec::new(buf, self.pixel_width, self.pixel_height)
+        ImgVec::new(self.frame_buf.clone(), self.pixel_width, self.pixel_height)
     }
 
     fn pixel_size(&self) -> (usize, usize) {

@@ -14,6 +14,7 @@ pub struct ResvgRenderer<'a> {
     options: usvg::Options<'a>,
     transform: tiny_skia::Transform,
     header: String,
+    pixmap: tiny_skia::Pixmap,
 }
 
 fn color_to_style(color: &avt::Color, theme: &Theme) -> String {
@@ -80,6 +81,8 @@ impl<'a> ResvgRenderer<'a> {
         let tree = usvg::Tree::from_str(&svg, &options).unwrap();
         let pixel_width = tree.size().width() as usize;
         let pixel_height = tree.size().height() as usize;
+        let pixmap =
+            tiny_skia::Pixmap::new(pixel_width as u32, pixel_height as u32).unwrap();
 
         Self {
             terminal_size: settings.terminal_size,
@@ -91,6 +94,7 @@ impl<'a> ResvgRenderer<'a> {
             options,
             transform,
             header,
+            pixmap,
         }
     }
 
@@ -247,11 +251,9 @@ impl<'a> Renderer for ResvgRenderer<'a> {
         svg.push_str(Self::footer());
         let tree = usvg::Tree::from_str(&svg, &self.options).unwrap();
 
-        let mut pixmap =
-            tiny_skia::Pixmap::new(self.pixel_width as u32, self.pixel_height as u32).unwrap();
-
-        resvg::render(&tree, self.transform, &mut pixmap.as_mut());
-        let buf = pixmap.take().as_rgba().to_vec();
+        self.pixmap.fill(tiny_skia::Color::TRANSPARENT);
+        resvg::render(&tree, self.transform, &mut self.pixmap.as_mut());
+        let buf = self.pixmap.data().as_rgba().to_vec();
 
         ImgVec::new(buf, self.pixel_width, self.pixel_height)
     }
