@@ -1,4 +1,5 @@
 mod asciicast;
+mod encoder;
 mod events;
 mod fonts;
 mod renderer;
@@ -6,8 +7,10 @@ mod theme;
 mod vt;
 
 use std::fmt::{Debug, Display};
-use std::io::{BufRead, Write};
-use std::{iter, thread, time::Instant};
+use std::io::BufRead;
+use std::{iter, time::Instant};
+
+pub use encoder::{Encoder, EncoderBackend};
 
 use anyhow::{anyhow, Result};
 use clap::ArgEnum;
@@ -27,6 +30,7 @@ pub const DEFAULT_IDLE_TIME_LIMIT: f64 = 5.0;
 
 pub struct Config {
     pub cols: Option<usize>,
+    pub encoder_backend: Option<EncoderBackend>,
     pub font_dirs: Vec<String>,
     pub font_family: String,
     pub font_size: usize,
@@ -35,6 +39,7 @@ pub struct Config {
     pub last_frame_duration: f64,
     pub line_height: f64,
     pub no_loop: bool,
+    pub output_path: std::path::PathBuf,
     pub renderer: Renderer,
     pub rows: Option<usize>,
     pub speed: f64,
@@ -46,6 +51,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             cols: None,
+            encoder_backend: None,
             font_dirs: vec![],
             font_family: String::from(DEFAULT_FONT_FAMILY),
             font_size: DEFAULT_FONT_SIZE,
@@ -54,6 +60,7 @@ impl Default for Config {
             last_frame_duration: DEFAULT_LAST_FRAME_DURATION,
             line_height: DEFAULT_LINE_HEIGHT,
             no_loop: DEFAULT_NO_LOOP,
+            output_path: std::path::PathBuf::new(),
             renderer: Default::default(),
             rows: None,
             speed: DEFAULT_SPEED,
@@ -68,6 +75,7 @@ pub enum Renderer {
     #[default]
     Resvg,
     Fontdue,
+    Shaped,
 }
 
 #[derive(Clone, Debug, ArgEnum, Default)]
@@ -129,7 +137,7 @@ impl Display for Theme {
     }
 }
 
-pub fn run<I: BufRead, O: Write + Send>(input: I, output: O, config: Config) -> Result<()> {
+pub fn run<I: BufRead>(input: I, config: Config) -> Result<()> {
     let Asciicast { header, events, .. } = asciicast::open(input)?;
 
     if header.term_cols == 0 || header.term_rows == 0 {
@@ -184,54 +192,40 @@ pub fn run<I: BufRead, O: Write + Send>(input: I, output: O, config: Config) -> 
     let mut renderer: Box<dyn renderer::Renderer> = match config.renderer {
         Renderer::Fontdue => Box::new(renderer::fontdue(settings)),
         Renderer::Resvg => Box::new(renderer::resvg(settings)),
+        Renderer::Shaped => Box::new(renderer::shaped(settings)),
     };
 
     let (width, height) = renderer.pixel_size();
 
-    info!("gif dimensions: {}x{}", width, height);
+    info!("output dimensions: {}x{}", width, height);
 
-    let repeat = if config.no_loop {
-        gifski::Repeat::Finite(0)
-    } else {
-        gifski::Repeat::Infinite
-    };
-
-    let settings = gifski::Settings {
-        width: Some(width as u32),
-        height: Some(height as u32),
-        fast: true,
-        repeat,
-        ..Default::default()
-    };
-
-    let (collector, writer) = gifski::new(settings)?;
     let start_time = Instant::now();
 
-    thread::scope(|s| {
-        let writer_handle = s.spawn(move || {
-            if config.show_progress_bar {
-                let mut pr = gifski::progress::ProgressBar::new(count);
-                let result = writer.write(output, &mut pr);
-                pr.finish();
-                println!();
-                result
-            } else {
-                let mut pr = gifski::progress::NoProgress {};
-                writer.write(output, &mut pr)
-            }
-        });
+    let backend = encoder::infer_backend(&config.output_path, config.encoder_backend.clone())?;
+    let mut enc = encoder::create(
+        backend,
+        &config.output_path,
+        width,
+        height,
+        config.no_loop,
+        count,
+        config.show_progress_bar,
+    )?;
 
-        for (i, frame) in frames.enumerate() {
-            let (time, lines, cursor) = frame?;
-            let image = renderer.render(lines, cursor);
-            let time = if i == 0 { 0.0 } else { time };
-            collector.add_frame_rgba(i, image, time + config.last_frame_duration)?;
-        }
+    for (i, frame) in frames.enumerate() {
+        let (time, lines, cursor) = frame?;
+        let image = renderer.render(lines, cursor);
+        let time = if i == 0 { 0.0 } else { time };
+        enc.add_frame(encoder::FrameData {
+            index: i,
+            rgba_pixels: image.into_buf(),
+            width,
+            height,
+            time: time + config.last_frame_duration,
+        })?;
+    }
 
-        drop(collector);
-        writer_handle.join().unwrap()?;
-        Result::<()>::Ok(())
-    })?;
+    enc.finish()?;
 
     info!(
         "rendering finished in {}s",

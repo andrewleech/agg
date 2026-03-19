@@ -1,5 +1,6 @@
 mod fontdue;
 mod resvg;
+mod shaped;
 
 use imgref::ImgVec;
 use rgb::{RGB8, RGBA8};
@@ -26,6 +27,10 @@ pub fn resvg<'a>(settings: Settings) -> resvg::ResvgRenderer<'a> {
 
 pub fn fontdue(settings: Settings) -> fontdue::FontdueRenderer {
     fontdue::FontdueRenderer::new(settings)
+}
+
+pub fn shaped(settings: Settings) -> shaped::ShapedRenderer {
+    shaped::ShapedRenderer::new(settings)
 }
 
 struct TextAttrs {

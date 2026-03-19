@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use clap::{ArgAction, ArgEnum, Parser};
 use reqwest::header;
 use std::io;
-use std::{fs::File, io::BufReader, iter};
+use std::{fs::File, io::BufReader, iter, path::PathBuf};
 
 static USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
 
@@ -50,12 +50,16 @@ struct Cli {
     /// asciicast path/filename or URL
     input_filename_or_url: String,
 
-    /// GIF path/filename
+    /// Output path/filename
     output_filename: String,
 
     /// Select frame rendering backend
     #[clap(long, arg_enum, default_value_t = agg::Renderer::default())]
     renderer: agg::Renderer,
+
+    /// Select encoding backend [default: auto-detect from file extension]
+    #[clap(long, arg_enum)]
+    encoder: Option<agg::EncoderBackend>,
 
     /// Specify font family
     #[clap(long, default_value_t = String::from(agg::DEFAULT_FONT_FAMILY))]
@@ -172,8 +176,11 @@ fn main() -> Result<()> {
         .format_timestamp(None)
         .init();
 
+    let output_path = PathBuf::from(&cli.output_filename);
+
     let config = agg::Config {
         cols: cli.cols,
+        encoder_backend: cli.encoder,
         font_dirs: cli.font_dir,
         font_family: cli.font_family,
         font_size: cli.font_size,
@@ -182,6 +189,7 @@ fn main() -> Result<()> {
         last_frame_duration: cli.last_frame_duration,
         line_height: cli.line_height,
         no_loop: cli.no_loop,
+        output_path,
         renderer: cli.renderer,
         rows: cli.rows,
         speed: cli.speed,
@@ -190,9 +198,8 @@ fn main() -> Result<()> {
     };
 
     let input = BufReader::new(reader(&cli.input_filename_or_url)?);
-    let mut output = File::create(&cli.output_filename)?;
 
-    match agg::run(input, &mut output, config) {
+    match agg::run(input, config) {
         Ok(ok) => Ok(ok),
         Err(err) => {
             std::fs::remove_file(cli.output_filename)?;
