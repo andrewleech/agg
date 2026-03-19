@@ -12,7 +12,7 @@ license = "GPL-3.0-or-later"
 rust-version = "1.85.0"
 
 [features]
-ffmpeg = []
+ffmpeg = ["dep:ffmpeg-next"]
 
 [dependencies]
 anyhow = "1"
@@ -21,6 +21,7 @@ clap = { version = "3.2.15", features = ["derive"] }
 env_logger = "0.10"
 fontdb = "0.23.0"
 fontdue = "0.7"
+ffmpeg-next = { version = "7", optional = true, default-features = false, features = ["codec", "format", "software-scaling"] }
 gifski = "1"
 imgref = "1"
 log = "0.4"
