@@ -10,6 +10,7 @@ use super::{Encoder, FrameData};
 pub struct GifskiEncoder {
     collector: Option<gifski::Collector>,
     writer_thread: Option<thread::JoinHandle<gifski::CatResult<()>>>,
+    last_frame_duration: f64,
 }
 
 impl GifskiEncoder {
@@ -18,6 +19,7 @@ impl GifskiEncoder {
         width: usize,
         height: usize,
         no_loop: bool,
+        last_frame_duration: f64,
         frame_count: u64,
         show_progress: bool,
     ) -> Result<Self> {
@@ -54,6 +56,7 @@ impl GifskiEncoder {
         Ok(Self {
             collector: Some(collector),
             writer_thread: Some(writer_thread),
+            last_frame_duration,
         })
     }
 }
@@ -73,8 +76,12 @@ impl Encoder for GifskiEncoder {
     fn add_frame(&mut self, frame: FrameData) -> Result<()> {
         let collector = self.collector.as_ref().expect("add_frame called after finish");
         let image = Img::new(frame.rgba_pixels, frame.width, frame.height);
+        // Shift timestamps forward by last_frame_duration so that gifski's
+        // duration calculation (next_pts - this_pts) produces the correct gap
+        // for the last frame when the GIF loops.
+        let pts = frame.time + self.last_frame_duration;
         collector
-            .add_frame_rgba(frame.index, image, frame.time)
+            .add_frame_rgba(frame.index, image, pts)
             .map_err(|e| anyhow::anyhow!("{}", e))
     }
 

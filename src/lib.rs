@@ -208,6 +208,7 @@ pub fn run<I: BufRead>(input: I, config: Config) -> Result<()> {
         width,
         height,
         config.no_loop,
+        config.last_frame_duration,
         count,
         config.show_progress_bar,
     )?;
@@ -221,7 +222,7 @@ pub fn run<I: BufRead>(input: I, config: Config) -> Result<()> {
             rgba_pixels: image.into_buf(),
             width,
             height,
-            time: time + config.last_frame_duration,
+            time,
         })?;
     }
 

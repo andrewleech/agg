@@ -106,6 +106,7 @@ pub fn create(
     width: usize,
     height: usize,
     no_loop: bool,
+    last_frame_duration: f64,
     frame_count: u64,
     show_progress: bool,
 ) -> Result<Box<dyn Encoder>> {
@@ -115,6 +116,7 @@ pub fn create(
             width,
             height,
             no_loop,
+            last_frame_duration,
             frame_count,
             show_progress,
         )?)),
